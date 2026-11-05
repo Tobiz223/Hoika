@@ -134,7 +134,7 @@ function dayTick() {
 }
 const Save = {
   key:'steelFrontier.save.',
-  dump() { return JSON.stringify(G, (k, v) => { if (v instanceof Float32Array) return undefined; if (k === 'dcache') return undefined; return v; }); },
+  dump() { return JSON.stringify(G, (k, v) => { if (v instanceof Float32Array) return undefined; if (k === 'dcache' || k === '_wx' || k === '_wy' || k === '_px' || k === '_py') return undefined; return v; }); },
   load(json) { G = JSON.parse(json); G.groups = G.groups || {}; for (const g of Object.values(G.c).flatMap(c => c.gens)) g.rank = g.rank || 'general'; for (const t in G.c) { const c = G.c[t]; c.dcache = {}; c.sup = null; recalcMods(c); } recalcWarRel(); rebuildIndex(); for (const t in G.c) if (!G.c[t].dead) computeSupply(G.c[t]); if (!G.snow.length) updateWeather(); G.ctrlDirty = true; },
   write(slot) { try { localStorage.setItem(this.key + slot, this.dump()); localStorage.setItem(this.key + slot + '.meta', JSON.stringify({ when:new Date().toLocaleString('ru'), date:dateStr(), tag:C(G.player).n })); return true; } catch (e) { return false; } },
   read(slot) { try { const j = localStorage.getItem(this.key + slot); if (!j) return false; this.load(j); return true; } catch (e) { return false; } },

@@ -3,7 +3,7 @@ import puppeteer from 'puppeteer-core'; import path from 'path';
 const R = path.resolve(import.meta.dirname, '..'); const OUT = process.argv[2];
 const b = await puppeteer.launch({ executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe', headless:'new', args:['--use-angle=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist', '--window-size=1600,900'] });
 const p = await b.newPage(); await p.setViewport({ width:1600, height:900 });
-const errs = []; p.on('pageerror', e => errs.push('PAGEERR ' + e.message + ' ' + (e.stack || '').split('\n').slice(1, 3).join(' '))); p.on('console', m => { if (m.type() === 'error') errs.push('CONSOLE ' + m.text()); });
+const errs = []; p.on('pageerror', e => errs.push('PAGEERR ' + e.message + ' ' + (e.stack || '').split('\n').slice(1, 3).join(' '))); p.on('console', m => { if (m.type() === 'error') errs.push('CONSOLE ' + m.text() + ' ' + (m.location()?.url || '')); });
 await p.goto('file:///' + R.replace(/\\/g, '/') + '/index.html'); await p.waitForFunction(() => document.querySelector('#loading').classList.contains('hidden'), { timeout:120000 });
 const ev0 = (f, ...a) => p.evaluate(f, ...a);
 const res = []; const check = (n, v) => res.push((v ? 'OK   ' : 'FAIL ') + n);
@@ -92,6 +92,7 @@ await p.keyboard.press('KeyB'); await wait(150); check('окно войны от
 const onlyMine = await ev(() => { const fake = { id:999, name:'Чужая война проверка', atk:['SWE'], def:['NOR'], start:G.hour }; G.wars.push(fake); UI.renderPanel(); const has = document.querySelector('#panel').textContent.includes('Чужая война проверка'); G.wars.pop(); return !has; }); check('чужие войны не показаны', onlyMine);
 const limits = await ev(() => ({ sov:surrenderLimit(C('SOV')), fra:surrenderLimit(C('FRA')) })); check('лимиты у стран разные: ' + JSON.stringify(limits), limits.sov > limits.fra);
 await p.keyboard.press('Escape');
+await ev(() => { UI.closePanel(); const b = Object.values(G.battles)[0] || null; const ids = Object.keys(G.battles); const P = b ? PROV[b.prov] : PROV[C('POL').capital]; Render.view.x = P.x; Render.view.y = P.y; Render.view.z = .9; Render.selected.clear(); UI.renderBottom(); }); await wait(1400); await p.screenshot({ path:path.join(OUT, 'ui_cones.png') });
 // Автопауза при войне
 const paused = await ev(() => { G.speed = 3; declareWar('GER', 'DEN', { force:true }); return G.speed; }); check('пауза при начале войны', paused === 0);
 // Оповещения

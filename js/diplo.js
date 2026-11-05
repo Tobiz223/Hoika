@@ -21,7 +21,7 @@ function addToWar(w, tag, sd) { const O = sd === 'atk' ? w.def : w.atk; if (w[sd
 function declareWar(a, b, opts = {}) {
   const A = C(a), Bc = C(b); if (!A || !Bc || a === b) return 'Нельзя'; if (isEnemy(a, b)) return 'Уже в войне'; if (A.nap?.[b] && !opts.force) return 'Действует пакт о ненападении'; if (isAlly(a, b) && !opts.force) return 'Вы союзники';
   if (!opts.force && !(A.wargoals && A.wargoals[b])) return 'Нет обоснования войны'; if (A.capitulated || Bc.capitulated) return 'Страна капитулировала';
-  const w = { id:nid(), name:opts.name || `${A.n} против ${Bc.n}`, atk:[a], def:[b], start:G.hour, goal:opts.goal || 'conquest' };
+  const w = { id:nid(), name:opts.name || `Война: ${A.n} — ${Bc.n}`, atk:[a], def:[b], start:G.hour, goal:opts.goal || 'conquest' };
   // Присоединение: у цели фракция и гаранты, у нападающего фракция
   const addF = (tag, sd) => { const F = factionOf(C(tag)); if (F) for (const m of F.members) if (m !== tag && !C(m).capitulated && !w[sd].includes(m) && !(sd === 'def' ? w.atk : w.def).includes(m)) w[sd].push(m); };
   addF(b, 'def'); if (!opts.noAllies) addF(a, 'atk');
@@ -30,9 +30,9 @@ function declareWar(a, b, opts = {}) {
   for (const t in G.c) { const m = G.c[t].master; if (m && w.def.includes(m) && !w.def.includes(t) && !w.atk.includes(t)) w.def.push(t); else if (m && w.atk.includes(m) && !w.atk.includes(t) && !w.def.includes(t)) w.atk.push(t); }
   for (const t of [...w.atk, ...w.def]) warBase(w, t);
   G.wars.push(w); recalcWarRel();
-  if (w.atk.includes(G.player) || w.def.includes(G.player)) { autoPause(); if (typeof Shell !== 'undefined') Shell.bigNews('ОБЪЯВЛЕНА ВОЙНА', w.name, `${A.n} напала на страну: ${Bc.n}`, 'war'); }
+  if (w.atk.includes(G.player) || w.def.includes(G.player)) { autoPause(); if (typeof Shell !== 'undefined') Shell.bigNews('ОБЪЯВЛЕНА ВОЙНА', `${A.n} — ${Bc.n}`, opts.name || '', 'war'); }
   G.wt = Math.min(100, G.wt + (Bc.major ? 12 : 4) * (A.i === 'dem' ? .3 : 1));
-  logMsg(`Война: ${A.n} напала на ${Bc.n}`, null, 'bad');
+  logMsg(`Война: ${A.n} — ${Bc.n}`, null, 'bad');
   for (const t of [...w.atk, ...w.def]) { const c = C(t); if (c.ai) aiPrepareWar(c); }
   return null;
 }

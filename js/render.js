@@ -242,41 +242,60 @@ void main(){
   tint(hex, f) { const [r, g, b] = this.hexRGB(hex); return `rgb(${clamp(r * f, 0, 255) | 0},${clamp(g * f, 0, 255) | 0},${clamp(b * f, 0, 255) | 0})`; },
   visibleTag(t) { const me = G.player; return t === me || isAlly(me, t) || isEnemy(me, t); },
   drawUnits(g) {
-    this.counters = []; const v = this.view; const W = v.z > .45 ? 40 : 30, H = v.z > .45 ? 26 : 22; const stacks = {};
-    for (const k in provDivs) { const arr = provDivs[k]; if (!arr.length) continue; for (const id of arr) { const d = G.divs[id]; if (!d || !this.visibleTag(d.side || d.tag) && !this.visibleTag(d.tag)) continue; const key = k + '|' + d.tag; (stacks[key] = stacks[key] || { prov:+k, tag:d.tag, divs:[] }).divs.push(d); } }
-    // На мелком масштабе показываем только игрока и его врагов
-        if (v.z < .3) { for (const A of Object.values(G.armies)) { if (A.tag !== G.player || !A.divs.length) continue; let x = 0, y = 0, n = 0, org = 0, str = 0, sel = false; const ico = {}, ids = []; for (const i of A.divs) { const d = G.divs[i]; if (!d) continue; const st = divStats(C(d.tag), d.tpl); x += PROV[d.prov].x; y += PROV[d.prov].y; org += d.org / Math.max(1, st.org); str += d.str; ico[st.ico] = (ico[st.ico] || 0) + 1; n++; ids.push(i); if (this.selected.has(i)) sel = true; } if (!n) continue; const [sx, sy] = this.worldToScreen(x / n, y / n); const best = Object.entries(ico).sort((a, b) => b[1] - a[1])[0][0]; this.drawCounter(g, sx - 22, sy - 14, 44, 28, G.player, best, n, org / n, str / n, sel); this.counters.push({ x:sx - 22, y:sy - 14, w:44, h:28, divs:ids, prov:0, army:A.id }); } for (const key in stacks) if (stacks[key].tag === G.player && stacks[key].divs.every(d => d.army)) delete stacks[key]; }
+    this.counters = []; const v = this.view, now = performance.now(), dt = Math.min(.1, (now - (this.lastUnitT || now)) / 1000); this.lastUnitT = now; const k = 1 - Math.exp(-dt * 9), W = v.z > .45 ? 40 : 30, H = v.z > .45 ? 26 : 22, stacks = {};
+    // Движущиеся идут отдельным квадратиком, стоящие не дёргаются вслед за ними
+    for (const id in G.divs) { const d = G.divs[id]; if (!this.visibleTag(d.side || d.tag) && !this.visibleTag(d.tag)) continue; const mv = d.path.length && !d.attacking && !blockersAt(side(d), d.path[0]).length ? d.path[0] : 0; const key = d.prov + '|' + d.tag + '|' + mv; (stacks[key] = stacks[key] || { prov:d.prov, tag:d.tag, next:mv, divs:[] }).divs.push(d); }
+    if (v.z < .3) { for (const A of Object.values(G.armies)) { if (A.tag !== G.player || !A.divs.length) continue; let x = 0, y = 0, n = 0, org = 0, str = 0, sel = false; const ico = {}, ids = []; for (const i of A.divs) { const d = G.divs[i]; if (!d) continue; const st = divStats(C(d.tag), d.tpl); x += PROV[d.prov].x; y += PROV[d.prov].y; org += d.org / Math.max(1, st.org); str += d.str; ico[st.ico] = (ico[st.ico] || 0) + 1; n++; ids.push(i); if (this.selected.has(i)) sel = true; } if (!n) continue; A._px = A._px == null ? x / n : A._px + (x / n - A._px) * k; A._py = A._py == null ? y / n : A._py + (y / n - A._py) * k; const [sx, sy] = this.worldToScreen(A._px, A._py); const best = Object.entries(ico).sort((a, b) => b[1] - a[1])[0][0]; this.drawCounter(g, sx - 22, sy - 14, 44, 28, G.player, best, n, org / n, str / n, sel); this.counters.push({ x:sx - 22, y:sy - 14, w:44, h:28, divs:ids, prov:0, army:A.id }); } for (const key in stacks) if (stacks[key].tag === G.player && stacks[key].divs.every(d => d.army)) delete stacks[key]; }
     const groups = {}; for (const key in stacks) { const S = stacks[key]; (groups[S.prov] = groups[S.prov] || []).push(S); }
+    const ww = W / v.z, gap = (W + 2) / v.z;
     for (const p in groups) {
-      const P = PROV[p]; const list = groups[p]; let [sx, sy] = this.worldToScreen(P.x, P.y); if (sx < -60 || sy < -40 || sx > this.ov.width + 60 || sy > this.ov.height + 40) continue;
-      list.forEach((S, i) => {
-                const moving = S.divs.find(d => d.path.length && !d.attacking); let x = sx - W / 2 + i * (W + 2) - (list.length - 1) * (W + 2) / 2, y = sy - H / 2;
-        if (moving && moving.path.length) { const nx = PROV[moving.path[0]]; const f = clamp(moving.prog / Math.max(1, DIST(moving.prov, moving.path[0])), 0, 1); const [ax, ay] = this.worldToScreen(nx.x, nx.y); x += (ax - sx) * f; y += (ay - sy) * f; }
-        let org = 0, str = 0, ico = {}; let sel = false; for (const d of S.divs) { const st = divStats(C(d.tag), d.tpl); org += d.org / Math.max(1, st.org); str += d.str; ico[st.ico] = (ico[st.ico] || 0) + 1; if (this.selected.has(d.id)) sel = true; }
-        const n = S.divs.length; const best = Object.entries(ico).sort((a, b) => b[1] - a[1])[0][0];
-        this.drawCounter(g, x, y, W, H, S.tag, best, n, org / n, str / n, sel);
-        if (S.tag === G.player) this.counters.push({ x, y, w:W, h:H, divs:S.divs.map(d => d.id), prov:+p });
-        else this.counters.push({ x, y, w:W, h:H, enemy:true, prov:+p });
+      const P = PROV[p], list = groups[p].sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : a.next - b.next)), still = list.filter(S => !S.next);
+      list.forEach(S => {
+        // Цель в координатах карты: каждая дивизия плавно подъезжает к ней
+        const i = still.indexOf(S); let tx = P.x + (S.next ? 0 : (i - (still.length - 1) / 2) * gap), ty = P.y;
+        if (S.next) { const N = PROV[S.next]; let f = 0; for (const d of S.divs) f += d.prog; f = clamp(f / S.divs.length / Math.max(1, DIST(S.prov, S.next)), 0, 1); tx += (N.x - P.x) * f; ty += (N.y - P.y) * f; }
+        let x = 0, y = 0, org = 0, str = 0, sel = false; const ico = {};
+        for (const d of S.divs) { if (d._wx == null || Math.hypot(d._wx - tx, d._wy - ty) > 420) { d._wx = tx; d._wy = ty; } else { d._wx += (tx - d._wx) * k; d._wy += (ty - d._wy) * k; } x += d._wx; y += d._wy; const st = divStats(C(d.tag), d.tpl); org += d.org / Math.max(1, st.org); str += d.str; ico[st.ico] = (ico[st.ico] || 0) + 1; if (this.selected.has(d.id)) sel = true; }
+        const n = S.divs.length, [sx, sy] = this.worldToScreen(x / n, y / n); if (sx < -60 || sy < -40 || sx > this.ov.width + 60 || sy > this.ov.height + 40) return;
+        const best = Object.entries(ico).sort((a, b) => b[1] - a[1])[0][0], cx = sx - W / 2, cy = sy - H / 2;
+        this.drawCounter(g, cx, cy, W, H, S.tag, best, n, org / n, str / n, sel);
+        if (S.tag === G.player) this.counters.push({ x:cx, y:cy, w:W, h:H, divs:S.divs.map(d => d.id), prov:+p }); else this.counters.push({ x:cx, y:cy, w:W, h:H, enemy:true, prov:+p });
       });
     }
   },
+  // Шанс игрока в сражении: 0 — проигрываем, 1 — выигрываем
+  battleScore(b) { const adv = b.lastAdv || 1, atk = adv / (adv + 1); const me = G.player; const mineAtk = b.atkSide === me || isAlly(me, b.atkSide); return mineAtk ? atk : 1 - atk; },
+  // Большие колбочки на каждой атакуемой границе, цвет и появление плавные
   drawBattles(g) {
-    this.battleHit = [];
+    this.battleHit = []; const now = performance.now(), dt = Math.min(.1, (now - (this.lastBattleT || now)) / 1000); this.lastBattleT = now; const FX = this.battleFx = this.battleFx || new Map(), seen = new Set();
     for (const k in G.battles) {
-      const b = G.battles[k], P = PROV[b.prov]; if (!this.visibleTag(b.atkSide) && !this.visibleTag(G.ctrl[b.prov])) continue; const [sx, sy] = this.worldToScreen(P.x, P.y); if (sx < -40 || sy < -40 || sx > this.ov.width + 40 || sy > this.ov.height + 40) continue;
-      const x = sx - 9, y = sy - 32, pulse = .5 + .5 * Math.sin(performance.now() / 220); g.fillStyle = `rgba(230,70,40,${.14 + pulse * .22})`; g.beginPath(); g.arc(sx, y + 8, 14 + pulse * 5, 0, 7); g.fill(); g.fillStyle = 'rgba(0,0,0,.6)'; g.beginPath(); g.arc(sx, y + 8, 11, 0, 7); g.fill(); g.strokeStyle = '#e8c55a'; g.lineWidth = 1.5; g.stroke();
-      g.strokeStyle = '#f3ead2'; g.lineWidth = 2.2; g.beginPath(); g.moveTo(sx - 6, y + 2); g.lineTo(sx + 6, y + 14); g.moveTo(sx + 6, y + 2); g.lineTo(sx - 6, y + 14); g.stroke();
-      const adv = clamp((b.lastAdv || 1) / ((b.lastAdv || 1) + 1), 0, 1); g.fillStyle = '#a33'; g.fillRect(sx - 14, y + 20, 28, 4); g.fillStyle = '#5a5'; g.fillRect(sx - 14, y + 20, 28 * adv, 4);
-      this.battleHit.push({ x:sx - 13, y:y - 4, w:26, h:30, prov:b.prov });
+      const b = G.battles[k]; if (!this.visibleTag(b.atkSide) && !this.visibleTag(G.ctrl[b.prov])) continue; const dirs = {};
+      for (const id of b.atk) { const d = G.divs[id]; if (d && d.prov !== b.prov) dirs[d.prov] = (dirs[d.prov] || 0) + 1; }
+      const score = this.battleScore(b);
+      for (const src in dirs) { const key = src + '>' + b.prov; seen.add(key); let f = FX.get(key); if (!f) { f = { a:0, s:score, src:+src, prov:b.prov, n:dirs[src], born:now }; FX.set(key, f); } f.live = true; f.n = dirs[src]; f.goal = score; }
     }
-    // линии атак
-    g.strokeStyle = 'rgba(230,70,50,.75)'; g.lineWidth = 2;
-    for (const k in G.battles) { const b = G.battles[k]; if (!this.visibleTag(b.atkSide) && !this.visibleTag(G.ctrl[b.prov])) continue; const seen = new Set(); for (const id of b.atk) { const d = G.divs[id]; if (!d || seen.has(d.prov)) continue; seen.add(d.prov); if (d.prov === b.prov) continue; const [a, c] = this.worldToScreen(PROV[d.prov].x, PROV[d.prov].y), [e, f] = this.worldToScreen(PROV[b.prov].x, PROV[b.prov].y); g.beginPath(); g.moveTo(a, c); g.lineTo(e, f); g.stroke(); } }
+    for (const [key, f] of FX) { if (!seen.has(key)) f.live = false; const hold = f.live || now - f.born < 1500; f.a = clamp(f.a + (hold ? dt * 3.5 : -dt * 1.8), 0, 1); if (f.goal != null) f.s += (f.goal - f.s) * (1 - Math.exp(-dt * 1.6)); if (!hold && f.a <= 0) { FX.delete(key); continue; } this.drawCone(g, f, now); }
+  },
+  drawCone(g, f, now) {
+    const A = PROV[f.src], B = PROV[f.prov]; if (!A || !B) return; const segs = this.borderChain(f.src, f.prov); let mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2, n = 0, sx = 0, sy = 0; for (const s of segs) for (const [x, y] of s) { sx += x; sy += y; n++; } if (n) { mx = sx / n; my = sy / n; }
+    const [cx, cy] = this.worldToScreen(mx, my); if (cx < -160 || cy < -160 || cx > this.ov.width + 160 || cy > this.ov.height + 160) return;
+    const ang = Math.atan2(B.y - A.y, B.x - A.x), dist = Math.hypot(B.x - A.x, B.y - A.y) * this.view.z, L = clamp(dist * .7, 58, 84), W = clamp(L * .58, 34, 48) * (1 + Math.min(4, f.n) * .04), s = clamp(f.s, 0, 1);
+    const mixT = clamp((s - .46) / .08, 0, 1), R = Math.round(216 + (52 - 216) * mixT), G_ = Math.round(44 + (186 - 44) * mixT), Bl = Math.round(34 + (66 - 34) * mixT), col = a => 'rgba(' + R + ',' + G_ + ',' + Bl + ',' + a + ')';
+    const tail = -L * .56, head = L * .44, shape = () => { g.beginPath(); g.moveTo(tail, -W * .17); g.quadraticCurveTo(-L * .12, -W * .24, L * .02, -W * .52); g.lineTo(head, 0); g.lineTo(L * .02, W * .52); g.quadraticCurveTo(-L * .12, W * .24, tail, W * .17); g.closePath(); };
+    g.save(); g.translate(cx, cy); g.rotate(ang); g.globalAlpha = f.a;
+    g.shadowColor = 'rgba(0,0,0,.65)'; g.shadowBlur = 4; g.shadowOffsetY = 2; const gr = g.createLinearGradient(tail, 0, head, 0); gr.addColorStop(0, col(.3)); gr.addColorStop(.4, col(.78)); gr.addColorStop(1, col(1)); g.fillStyle = gr; shape(); g.fill(); g.shadowColor = 'transparent';
+    g.lineWidth = 2.2; g.strokeStyle = 'rgba(8,8,6,.95)'; shape(); g.stroke();
+    // Бегущие шевроны показывают направление удара
+    g.save(); shape(); g.clip(); g.strokeStyle = 'rgba(255,255,240,.55)'; g.lineWidth = 2; g.lineCap = 'round'; g.lineJoin = 'round'; const step = L * .3, off = (now / 900 % 1) * step; for (let i = -1; i < 5; i++) { const x = tail + i * step + off, h = W * .3; g.beginPath(); g.moveTo(x - h * .55, -h); g.lineTo(x + h * .35, 0); g.lineTo(x - h * .55, h); g.stroke(); } g.restore();
+    g.restore();
+    // Значок шанса: щёлкается как сражение
+    const pctV = Math.round(s * 100), bx = cx, by = cy; g.save(); g.globalAlpha = f.a; g.beginPath(); g.arc(bx, by, 11, 0, 7); g.fillStyle = 'rgba(12,11,8,.94)'; g.fill(); g.lineWidth = 2.5; g.strokeStyle = col(1); g.stroke(); g.font = '700 9.5px Oswald, Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#f5efdd'; g.fillText(pctV + '%', bx, by + .5); g.restore();
+    if (f.live) this.battleHit.push({ x:bx - 13, y:by - 13, w:26, h:26, prov:f.prov });
   },
   drawFleets(g) {
     const zs = {}; for (const id in G.fleets) { const f = G.fleets[id]; if (!f.ships.length || f.mission === 'base' || !this.visibleTag(f.tag)) continue; (zs[f.zone] = zs[f.zone] || []).push(f); }
     this.fleetHit = [];
     for (const z in zs) { const P = PROV[z]; let [sx, sy] = this.worldToScreen(P.x, P.y); sy += 12; zs[z].forEach((f, i) => { const x = sx - 12 + i * 26, y = sy; const col = C(f.tag).color; g.fillStyle = 'rgba(0,0,0,.45)'; g.fillRect(x + 1, y + 2, 24, 14); g.fillStyle = col; g.fillRect(x, y, 24, 14); g.strokeStyle = f.tag === G.player ? '#cfe6ff' : '#111'; g.lineWidth = 1; g.strokeRect(x + .5, y + .5, 23, 13); g.fillStyle = '#fff'; g.beginPath(); g.moveTo(x + 3, y + 8); g.lineTo(x + 21, y + 8); g.lineTo(x + 18, y + 12); g.lineTo(x + 6, y + 12); g.fill(); g.font = '700 9px Arial'; g.textAlign = 'center'; g.fillText(f.ships.length, x + 12, y + 5); this.fleetHit.push({ x, y, w:24, h:14, fleet:f.id }); }); }
   },
-  drawLandings(g) { for (const L of G.landings) { const d = G.divs[L.divs[0]]; if (!d || L.tag !== G.player) continue; this.arrow(g, PROV[d.prov].x, PROV[d.prov].y, PROV[L.to].x, PROV[L.to].y, '#3f8fd8'); } },
+  drawLandings(g) { for (const L of G.landings) { const d = G.divs[L.divs[0]]; if (!d || L.tag !== G.player || L.auto) continue; this.arrow(g, PROV[d.prov].x, PROV[d.prov].y, PROV[L.to].x, PROV[L.to].y, '#3f8fd8'); } },
 };

@@ -139,6 +139,8 @@ function moveSpeed(d, c, s, to) {
   return s.spd * .7 * T.spd * w.spd * (.75 + infra * .08) * m * (PROV[d.prov].rivSet?.has(to) ? .75 : 1);
 }
 function hostileDivsAt(tag, p) { const out = []; for (const id of (provDivs[p] || [])) { const e = G.divs[id]; if (e && isEnemy(tag, side(e))) out.push(e); } return out; }
+// Кто реально держит провинцию: отступающие бой не принимают
+function blockersAt(tag, p) { return hostileDivsAt(tag, p).filter(e => !(e.retreat > 0 && e.path.length)); }
 function hourlyMove() {
   for (const id in G.divs) {
     const d = G.divs[id]; const c = C(d.tag);
@@ -147,7 +149,7 @@ function hourlyMove() {
     if (!d.path.length) continue;
     const next = d.path[0];
     if (!canEnter(side(d), next)) { d.path = []; d.prog = 0; continue; }
-    if (hostileDivsAt(side(d), next).length) { joinBattle(d, next); continue; }
+    if (blockersAt(side(d), next).length) { joinBattle(d, next); continue; }
     const s = divStats(c, d.tpl);
     d.prog += moveSpeed(d, c, s, next);
     if (d.prog >= DIST(d.prov, next)) {
@@ -207,8 +209,8 @@ function resolveSide(shooters, targets, b, attackerSide) {
     if (D.arm > A.prc) hits *= .55;
     const fortPenalty = attackerSide ? Math.max(.4, 1 - (G.fort[b.prov] || 0) * .06) : 1;
     hits *= fortPenalty;
-    t._orgD = (t._orgD || 0) + hits * .14;
-    t._strD = (t._strD || 0) + hits * .08 / Math.max(10, D.hp) * (1 + (C(t.tag).m.casualty || 0));
+    t._orgD = (t._orgD || 0) + hits * .065;
+    t._strD = (t._strD || 0) + hits * .045 / Math.max(10, D.hp) * (1 + (C(t.tag).m.casualty || 0));
   }
 }
 function retreatDiv(d, b) {
@@ -237,10 +239,10 @@ function hourlyBattles() {
       { const h = C(d.tag).history; h.cas = (h.cas || 0) + d._strD * divStats(C(d.tag), d.tpl).mp; }
       delete d._f;
     }
-    b.lastAdv = (A.reduce((v, x) => v + x.org, 0) + 1) / (D.reduce((v, x) => v + x.org, 0) + 1);
+    { const pw = (x, atk) => { const st = divStats(C(x.tag), x.tpl); return x.org * x.str * (atk ? st.sa + st.ha + st.brk : st.sa + st.ha + st.def * .25); }; b.lastAdv = (A.reduce((v, x) => v + pw(x, true), 0) + 1) / (D.reduce((v, x) => v + pw(x, false), 0) + 1); }
     for (const d of lost) {
       if (d._dead) { destroyDiv(d, 'уничтожена в бою'); continue; }
-      if (A.includes(d)) { removeFromBattle(d); d.path = []; d.prog = 0; d.plan = 0; }
+      if (A.includes(d)) { removeFromBattle(d); d.path = []; d.prog = 0; d.plan = 0; d.noAttack = G.hour + 60; }
       else retreatDiv(d, b);
     }
     // Опыт за бой
@@ -319,29 +321,38 @@ function runArmyFront(c, A) {
   if (n >= m) { const base = Math.floor(n / m); let extra = n - base * m; for (const p of list) want[p] = base; const prio = A.target ? list.slice().sort((a, b) => DIST(a, A.target) - DIST(b, A.target)) : list.filter((_, i) => i % 2 === 0).concat(list.filter((_, i) => i % 2)); for (const p of prio) { if (extra-- <= 0) break; want[p]++; } }
   else for (let i = 0; i < n; i++) want[list[Math.min(m - 1, Math.floor((i + .5) * m / n))]]++;
   const have = {}; for (const p of list) have[p] = 0; const free = [];
-  for (const d of dvs) { if (d.slot && !fronts.has(d.slot)) d.slot = null; if (d.boarding) { if (d.slot) have[d.slot]++; continue; } if (d.manual || d.retreat > 0) continue; if (d.attacking || (d.path.length === 1 && isEnemy(c.t, G.ctrl[d.path[0]]))) { if (fronts.has(d.prov)) { d.slot = d.prov; have[d.prov]++; } continue; } if (d.slot && have[d.slot] < want[d.slot]) have[d.slot]++; else { d.slot = null; free.push(d); } }
+  for (const d of dvs) { if (d.slot && !fronts.has(d.slot)) d.slot = null; if (d.boarding) { if (d.slot) have[d.slot]++; continue; } if (d.manual || d.retreat > 0) continue; if (d.attacking || (d.path.length === 1 && isEnemy(c.t, G.ctrl[d.path[0]]))) { if (fronts.has(d.prov)) { d.slot = d.prov; have[d.prov]++; } continue; } if (d.slot && have[d.slot] < want[d.slot] + 1) have[d.slot]++; else { d.slot = null; free.push(d); } }
   // Сначала занимаем провинцию, где уже стоим, затем ближайший незакрытый участок
   for (const d of free) if (fronts.has(d.prov) && have[d.prov] < want[d.prov]) { d.slot = d.prov; have[d.prov]++; d.path = []; d.prog = 0; }
   let routes = 0;
   const maxRoutes = c.ai ? 5 : 14;
-  for (const d of free) { if (d.slot || routes >= maxRoutes || (d.noRoute || 0) > G.hour) continue; const cand = list.filter(p => have[p] < want[p]).sort((a, b) => DIST(d.prov, a) - DIST(d.prov, b)).slice(0, c.ai ? 2 : 4); if (!cand.length) break; let ok = false; for (const p of cand) { routes++; if (!routeToSlot(c, d, p)) continue; d.slot = p; have[p]++; ok = true; break; } if (!ok) d.noRoute = G.hour + (c.ai ? 96 : 12); }
+  for (const p of list) { if (have[p] || !want[p]) continue; let pick = null, bd = 1e18; for (const d of dvs) { if (!d.slot || d.attacking || d.boarding || d.manual || have[d.slot] < 2 || (d.moved || 0) > G.hour) continue; const v = DIST(d.prov, p); if (v < bd) { bd = v; pick = d; } } if (pick) { have[pick.slot]--; pick.slot = null; free.push(pick); } }
+  for (const d of free) { if (d.slot || routes >= maxRoutes || (d.noRoute || 0) > G.hour) continue; const cand = list.filter(p => have[p] < want[p]).sort((a, b) => DIST(d.prov, a) - DIST(d.prov, b)).slice(0, c.ai ? 2 : 4); if (!cand.length) break; let ok = false; for (const p of cand) { routes++; if (!routeToSlot(c, d, p)) continue; d.slot = p; d.moved = G.hour + 72; have[p]++; ok = true; break; } if (!ok) d.noRoute = G.hour + (c.ai ? 96 : 12); }
   // Дивизии сверх потребности держатся рядом с участком, а не стоят где попало
   A._gaps = list.filter(p => !have[p]).length;
   for (const d of dvs) if (d.slot && !d.boarding && !d.manual && !d.attacking && !d.path.length && d.prov !== d.slot && routes < maxRoutes) { routes++; if (!routeToSlot(c, d, d.slot)) { d.slot = null; d.noRoute = G.hour + (c.ai ? 96 : 12); } }
-  // Наступление
+  // Наступление: из провинции бьют вместе и по одной цели, соседние участки поддерживают начатый бой
   if (A.mode !== 'attack') return;
+  const byProv = {};
   for (const d of dvs) {
     if (d.boarding || d.manual || d.attacking || d.path.length || d.retreat > 0 || !fronts.has(d.prov)) continue;
-    const s = divStats(c, d.tpl); if (d.org < s.org * .45 || d.str < .3 || d.sup < .1) continue;
-    let best = 0, bv = -1e9; const tp = A.target ? PROV[A.target] : null;
-    for (const a of PROV[d.prov].land) {
-      const ct = G.ctrl[a]; if (!ct || !isEnemy(c.t, ct)) continue;
-      const foes = hostileDivsAt(c.t, a); const strEnemy = foes.reduce((v, e) => v + (divStats(C(e.tag), e.tpl).def) * e.str * (e.org / Math.max(1, divStats(C(e.tag), e.tpl).org)), 0);
-      let v = foes.length ? -strEnemy * .01 : 3; v -= (G.fort[a] || 0) * .4 + (PROV[a].t === 'mountain' ? 1 : 0) + (PROV[d.prov].rivSet?.has(a) ? .5 : 0); v += (G.vp[a] || 0) * .15;
-      if (tp) v -= Math.hypot(PROV[a].x - tp.x, PROV[a].y - tp.y) * .012; v += Math.random() * .4;
-      if (v > bv) { bv = v; best = a; }
+    const s = divStats(c, d.tpl); if ((d.noAttack || 0) > G.hour || d.org < s.org * .7 || d.str < .3 || d.sup < .1) continue;
+    (byProv[d.prov] = byProv[d.prov] || []).push(d);
+  }
+  const tp = A.target ? PROV[A.target] : null;
+  for (const p in byProv) {
+    const group = byProv[p]; let best = 0, bv = -1e9, bestEn = 0;
+    for (const t of PROV[p].land) {
+      const ct = G.ctrl[t]; if (!ct || !isEnemy(c.t, ct)) continue;
+      const foes = hostileDivsAt(c.t, t); let en = 0; for (const e of foes) { const st = divStats(C(e.tag), e.tpl); en += st.def * e.str * (e.org / Math.max(1, st.org)); }
+      let v = foes.length ? -en * .01 : 3; v -= (G.fort[t] || 0) * .4 + (PROV[t].t === 'mountain' ? 1 : 0) + (PROV[p].rivSet?.has(+t) ? .5 : 0); v += (G.vp[t] || 0) * .15; if (G.battles[t]) v += 2.5;
+      if (tp) v -= Math.hypot(PROV[t].x - tp.x, PROV[t].y - tp.y) * .012;
+      if (v > bv) { bv = v; best = t; bestEn = en * .25 * (1 + (G.fort[t] || 0) * .12); }
     }
-    if (best) { const foes = hostileDivsAt(c.t, best); let my = 0; for (const id of provDivs[d.prov] || []) { const o = G.divs[id]; if (o && o.tag === c.t) my += divStats(c, o.tpl).sa * o.str * (o.org / Math.max(1, divStats(c, o.tpl).org)); } const en = foes.reduce((v, e) => v + divStats(C(e.tag), e.tpl).def * e.str * .25, 0) * (1 + (G.fort[best] || 0) * .12); if (!foes.length || my > en * (A.aggr ?? .45) || A.target) { d.path = [best]; d.prog = 0; } }
+    if (!best) continue;
+    let my = 0; for (const d of group) { const st = divStats(c, d.tpl); my += st.sa * d.str * (d.org / Math.max(1, st.org)); }
+    if (bestEn > 0 && my <= bestEn * (A.aggr ?? .9) && !G.battles[best]) continue; // Сил мало: ждём подкреплений, а не гибнем поодиночке
+    for (const d of group) { d.path = [best]; d.prog = 0; }
   }
 }
 
